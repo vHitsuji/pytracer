@@ -1,9 +1,11 @@
+
 # Pytracer
   We made a basic ray-tracer engine in Python from scratch. The engine
   supports spheres and triangles and can also load meshes in the obj
   format. Since ray-tracers involve a lot of geometrical calculations,
   we had to implement some optimization schemes such as acceleration
   data-structure or tracing packs of rays with SIMD support.
+
 
 
 Introduction
@@ -26,7 +28,7 @@ frame the project:
 
 Triangle intersection
 
-:   We were provided three 3D objects defined as a set of triangles. It
+ We were provided three 3D objects defined as a set of triangles. It
     was natural to start by implementing triangle intersections. For
     each vertex of triangles, a normal vector is provided. From that, it
     was also mandatory to implement barycentric normal interpolations
@@ -34,7 +36,7 @@ Triangle intersection
 
 Acceleration data-structure
 
-:   Ray-tracers involve a lot of geometrical computations. For each
+ Ray-tracers involve a lot of geometrical computations. For each
     pixel of the final picture, the naive way is to try to intersect a
     ray with each object in the scene. A simple calculation can show
     that this is not computationally tractable and we had to implement a
@@ -44,7 +46,7 @@ Acceleration data-structure
 
 Statistics
 
-:   We had to provide statistics such as the number of rays traced per
+We had to provide statistics such as the number of rays traced per
     second or the number of object intersection tests for a pixel.
 
 
@@ -91,7 +93,7 @@ data-structure.](report/img/bunny.png)
 the number of nodes traversals in the corresponding optimized
 data-structure.](report/img/tbbunny.png)
 
-Packs of rays and SIMD {#packs-of-rays-and-simd .unnumbered}
+Packs of rays and SIMD 
 ----------------------
 
 We did a massive *numpy* implementation that allows us to do
