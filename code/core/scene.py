@@ -3,8 +3,8 @@ np.seterr('raise')
 from core.object import Group, Triangle, Sphere
 from multiprocessing import Pool
 from itertools import accumulate
-
 import json
+
 
 class Light():
     def __init__(self, position):
@@ -35,7 +35,7 @@ class Scene():
     def light_position(self):
         return self.__light.position()
 
-    def trace(self, rays, multiprocess=4, split=100):
+    def trace(self, rays, multiprocess=4):
         print("Tracing ", rays.shape[0], " rays with ", multiprocess, " threads.")
         ts_list = np.full((rays.shape[0]), np.inf)
         objs_list = np.full((rays.shape[0]), None, dtype=np.object)
@@ -45,9 +45,9 @@ class Scene():
         else:
 
             p = Pool(multiprocess)
-            work = tuple(zip(*(np.array_split(rays, split),
-                               np.array_split(ts_list, split),
-                               np.array_split(objs_list, split))))
+            work = tuple(zip(*(np.array_split(rays, multiprocess),
+                               np.array_split(ts_list, multiprocess),
+                               np.array_split(objs_list, multiprocess))))
             results = tuple(zip(*p.starmap(self.root().hit, work)))
             ts_list = np.concatenate(results[0])
             objs_list = np.concatenate(results[1])
@@ -87,8 +87,6 @@ class Scene():
             for size_first_group in range(1, len(elementary_objects)):
                 size_second_group = len(elementary_objects) - size_first_group
 
-                first_group = end_sort_index[:size_first_group]
-                second_group = end_sort_index[size_first_group:]
 
                 first_group_bounding = boundings_box_splits[0][size_first_group]
                 second_group_bounding = boundings_box_splits[1][size_second_group]
@@ -105,6 +103,7 @@ class Scene():
 
             group1 = self.__split(elementary_objects[end_sort_index[:cut_at]], axis=(axis+1)%3)
             group2 = self.__split(elementary_objects[end_sort_index[cut_at:]], axis=(axis+1)%3)
+
             return Group([group1, group2])
 
     def serialize(self, filepath):

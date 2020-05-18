@@ -69,7 +69,6 @@ class Engine:
 
 
 
-
         normal_map = np.zeros((self.__width*self.__height, 3), dtype=np.uint8)
         normal_map[hit_rays] = ((normals+1.)*127).astype(np.uint8)
         normal_map = normal_map.reshape(self.__width,  -1, 3).transpose((1,0,2))
