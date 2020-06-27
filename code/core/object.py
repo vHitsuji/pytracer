@@ -36,13 +36,18 @@ class Object(ABC):
 
 
 class ElementaryObject(Object):
-    def __init__(self, name, color=None):
-
+    def __init__(self, name, diffuse=1, specular=1, eta=1.33, color=None):
+        # eta = 0 is equivalent to full reflection and no refraction
         super().__init__(name)
+        self.__diffuse = diffuse
+        self.__specular = specular
+        self.__eta = eta
 
         if color is None:
             color = np.random.rand(3)
-            color *= (255/np.linalg.norm(color))
+            color /= np.linalg.norm(color)
+        else:
+            color = np.array(color)/255
         self.__color = np.array(color)
 
     @abstractmethod
@@ -52,6 +57,17 @@ class ElementaryObject(Object):
     def elementary_objects(self):
         return [self]
 
+    @property
+    def eta(self):
+        return self.__eta
+
+    @property
+    def diffuse(self):
+        return self.__diffuse
+
+    @property
+    def specular(self):
+        return self.__specular
 
     def color(self):
         return self.__color
@@ -141,14 +157,13 @@ class Group(Object):
 
 class Sphere(ElementaryObject):
 
-    def __init__(self, center, radius, color=None, anti=False):
+    def __init__(self, center, radius, color=None, diffuse=1, specular= 0, eta=1.33):
 
-        super().__init__("sphere", color)
+        super().__init__("sphere", color=color, diffuse=diffuse, specular=specular, eta=eta)
         self.__center = np.array(center)
         self.__radius = radius
         self.__radius_square = radius*radius
         self.__hash = hash((tuple(self.__center), self.__radius))
-        self.__anti = anti
 
     def translate(self, vector):
         self.__center += vector
@@ -164,10 +179,14 @@ class Sphere(ElementaryObject):
         det = b*b - 4*c
         has_solution = np.argwhere(det >= 0).reshape(-1,)
         root_det = np.sqrt(det[has_solution])
-        if self.__anti:
-            root_det = - root_det
-        root = (-b[has_solution]-root_det)/2
-        has_hit = np.argwhere(root > 0).reshape(-1,)
+
+        root1 = (-b[has_solution]-root_det)/2
+        root2 = (-b[has_solution]+root_det)/2
+        root1[np.where(root1 <= 1e-5)] = np.inf
+        root2[np.where(root2 <= 1e-5)] = np.inf
+        root = np.minimum(root1, root2)
+
+        has_hit = np.argwhere(root < np.inf).reshape(-1,)
         sooner_hit = np.argwhere(ts_list[has_solution[has_hit]] > root[has_hit]).reshape(-1,)
         ts_list[has_solution[has_hit[sooner_hit]]] = root[has_hit[sooner_hit]]
         objs_list[has_solution[has_hit[sooner_hit]]] = self
@@ -184,8 +203,6 @@ class Sphere(ElementaryObject):
 
     def normal(self, point):
         normal = point-self.__center
-        if self.__anti:
-            normal = -normal
         normal /= np.linalg.norm(normal)
         return normal
 
@@ -204,7 +221,7 @@ class Sphere(ElementaryObject):
 
 class Mesh(Group):
 
-    def __init__(self, uri, position, color=None):
+    def __init__(self, uri, position, color=None, diffuse=1, specular=0, eta=1.33):
         lines = open(uri).read().splitlines()
         vertices = list()
         faces_points = list()
@@ -236,10 +253,10 @@ class Mesh(Group):
         triangles = list()
         if normals.shape[0] != 0:
             for i in range(faces_points.shape[0]):
-                triangles.append(Triangle(vertices[faces_points[i]-1], normals=normals[faces_normals[i]-1], color=color))
+                triangles.append(Triangle(vertices[faces_points[i]-1], normals=normals[faces_normals[i]-1], color=color, diffuse=diffuse, specular=specular, eta=eta))
         else:
             for i in range(faces_points.shape[0]):
-                triangles.append(Triangle(vertices[faces_points[i]-1], color=color))
+                triangles.append(Triangle(vertices[faces_points[i]-1], color=color, diffuse=diffuse, specular=specular, eta=eta))
 
 
         super().__init__(triangles, name=uri.split("/")[-1])
@@ -248,9 +265,9 @@ class Mesh(Group):
 
 class Triangle(ElementaryObject):
 
-    def __init__(self,points, normals=None, color=None):
-        super().__init__("triangle", color)
-        self.__points = np.array(points)
+    def __init__(self,points, normals=None, color=None, diffuse=1, specular=0, eta=1.33):
+        super().__init__("triangle", color=color, diffuse=diffuse, specular=specular, eta=eta)
+        self.__points = np.array(points, dtype=np.float)
         self.__point1, self.__point2, self.__point3 = self.__points
         self.__normals = None
         if normals is not None:
@@ -310,7 +327,7 @@ class Triangle(ElementaryObject):
         solvable1234 = solvable123[solvable4]
 
         ts = np.linalg.det(np.array((a_s[solvable1234], b_s[solvable1234], d[solvable1234],)).transpose((1, 2, 0)))/dets[solvable1234]
-        solvable5 = np.argwhere(ts > 0).reshape(-1, )
+        solvable5 = np.argwhere(ts > 1e-5).reshape(-1, )
         solvable12345 = solvable1234[solvable5]
 
 

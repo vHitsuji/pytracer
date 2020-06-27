@@ -1,11 +1,15 @@
+
+
 from core.engine import Engine
 from core.camera import Camera
+import json
 from core.object import Sphere, Mesh, Triangle, Group
-from core.scene import Scene, Light
+from core.scene import Scene, Light, LightProb
+import matplotlib.pyplot as plt
+import numpy as np
 from time import time
+from progressbar import progressbar
 from datetime import datetime, timedelta
-
-
 
 """
 Scenario:
@@ -23,46 +27,51 @@ Show the picture.
 """
 
 
+
 if __name__ == "__main__":
-    scene_id = "bunny"
-    engine = Engine(512, 512)
-    #Scenes definition:
 
-    if scene_id == "teapot":
-        camera = Camera([0,3,-6], [1,0,0], [0,-1,-0.5])
-        light = Light([10,-10,-10])
-        scene = Scene(light)
-        scene.addobject(Mesh("teapot.obj", [0, 0, 0], color=[255, 255, 255]))
-        scene.addobject(Triangle(((-10., 0., 10.),( 0., 0.,  -10.), ( 10., 0., 10.)), color=[255, 255, 255]))
-    elif scene_id == "bunny":
-        camera = Camera([0, 5, -15], [1, 0, 0], [0, -1, -0.3])
-        light = Light([10, -20, -10])
-        scene = Scene(light)
-        scene.addobject(Mesh("bunny.obj", [0, 0, 0], color=[255, 255, 255]))
-        scene.addobject(Triangle(((-100., 0., 100.), (0., 0., -100.), (100., 0., 100.)), color=[255, 255, 255]))
-    elif scene_id == "sponza":
-        camera = Camera([8, 1.5, -1], [0, 0, 1], [0, -1, 0], fov=0.95)
-        light = Light([0, 10, 0])
-        scene = Scene(light)
-        scene.addobject(Mesh("sponza.obj", [0, 0, 0], color=[255, 255, 255]))
 
-    # Scene optimization with BVH
-    start_t = time()
+
+
+    engine = Engine(500, 500)
+    camera = Camera([0,0,0], [1,0,0], [0,-1,0], fov = 1.5)
+    #light = Light([0,0,-100])
+    light = LightProb("hdrmap/grace_probe.pfm")
+    scene = Scene(light)
+
+    #scene.addobject(Sphere([0,0,0], 1000, anti=True))
+
+    #scene.addobject(Triangle(([-1000, -1000, 200], [1000,-1000, 200], [1000,1000, 200]), color=[255,0,0]))
+    #scene.addobject(Triangle(([-1000, -1000, 200], [1000,1000, 200], [-1000, 1000, 200])))
+
+    #scene.addobject(Triangle(([-10000, -10000, -1000], [10000,-10000, -1000], [10000,10000, -1000])))
+    #scene.addobject(Triangle(([-10000, -10000, -1000], [10000,10000, -1000], [-10000, 10000, -1000])))
+
+    np.random.seed(10)
+    for i in range(30):
+        x, y, z, r = np.random.randn(4)
+        #scene.addobject(Sphere([x*50, y*50, 100+z*10], 5+r*5, specular=0, diffuse=1, eta=0.01))
+
+    #scene.addobject(Triangle([-200,-200, 200], [-200,200, 200], [200,-200, 200]))
+    scene.addobject(Mesh("teapot.obj", [-1, -1, 6], color=[255, 255, 255], diffuse=1, specular=0, eta=1.33))
+    scene.addobject(Mesh("teapot.obj", [2, -1, 9], color=[255, 255, 255], diffuse=0, specular=1, eta=1.33))
+    #scene.addobject(Mesh("bunny.obj", [0, -1.5, 5], color=[100, 100, 100]))
+    #scene.addobject(Mesh("sponza.obj", [0, -1, 0], color=[100, 100, 100]))
+
+    print("optimization started")
     scene.optimize()
-    print("Time for optimizing: ", str(timedelta(seconds=int(time()-start_t))))
+    print("optimized")
 
-    # Rendering
     start_t = time()
-    image, tested_boxs, distances, normal_map, edges_map = engine.render(scene, camera)
+    image, tested_boxs, normal_map, edges_map = engine.render(scene, camera, max_loop=0)
     print("Time for rendering: ", str(timedelta(seconds=int(time()-start_t))))
 
 
-    # Images saving
     tested_boxs.save("tested_boxes.png")
-    edges_map.save("edgesmap.png")
-    distances.save("distances.png")
     image.save("raytracer.png")
-    normal_map.save("normal_map.png")
+    edges_map.save("edgesmap.png")
     image.show()
+
+    normal_map.save("normal_map.png")
 
     exit(0)

@@ -4,6 +4,8 @@ from core.object import Group, Triangle, Sphere
 from multiprocessing import Pool
 from itertools import accumulate
 import json
+import re
+from struct import *
 
 
 class Light():
@@ -12,6 +14,75 @@ class Light():
 
     def position(self):
         return self.__position
+
+
+class LightProb():
+    def __init__(self, uri):
+
+        with open(uri, "rb") as f:
+            # Line 1: PF=>RGB (3 channels), Pf=>Greyscale (1 channel)
+            type = f.readline().decode('latin-1')
+            if "PF" in type:
+                channels = 3
+            elif "Pf" in type:
+                channels = 1
+            else:
+                assert(False)
+            # Line 2: width height
+            line = f.readline().decode('latin-1')
+            width, height = re.findall('\d+', line)
+            width = int(width)
+            height = int(height)
+
+            # Line 3: +ve number means big endian, negative means little endian
+            line = f.readline().decode('latin-1')
+            BigEndian = True
+            if "-" in line:
+                BigEndian = False
+
+            # Slurp all binary data
+            samples = width * height * channels
+            buffer = f.read(samples * 4)
+
+            # Unpack floats with appropriate endianness
+            if BigEndian:
+                fmt = ">"
+            else:
+                fmt = "<"
+            fmt = fmt + str(samples) + "f"
+            img = unpack(fmt, buffer)
+            img = np.array(img).reshape(width, height, channels)
+            img = img.transpose(1,0,2)
+            assert (width==height)
+        self.__img = img
+
+    @property
+    def img(self):
+        return self.__img
+
+
+    def getColorsFromDirections(self, directions):
+        # formula from https://www.pauldebevec.com/Probes/
+        directions = directions.T
+        norms = np.sqrt(np.sum(directions ** 2, axis=0))
+        norms[np.where(norms == 0)] = 1
+        directions /= norms
+
+
+        x_y_norms = np.sqrt(np.sum(directions[:2]**2, axis=0))
+        x_y_norms[np.where(x_y_norms == 0)] = 1
+
+        size2 = self.__img.shape[0]/2
+        coordinates = (((directions[:2]*np.arccos(directions[2])*size2)/(np.pi*x_y_norms)) + size2).astype(np.int)
+        colors = self.__img[tuple(coordinates)]
+
+        return colors
+
+
+
+
+
+
 
 
 class Scene():
@@ -32,8 +103,10 @@ class Scene():
         return self.__datastructure[0]
 
 
-    def light_position(self):
-        return self.__light.position()
+
+    @property
+    def light(self):
+        return self.__light
 
     def trace(self, rays, multiprocess=4):
         print("Tracing ", rays.shape[0], " rays with ", multiprocess, " threads.")
