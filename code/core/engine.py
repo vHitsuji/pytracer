@@ -2,6 +2,7 @@ import numpy as np
 from PIL import Image
 from PIL import ImageFilter
 from core.scene import Light, LightProb
+from progressbar import progressbar
 from seaborn import distplot
 import matplotlib.pyplot as plt
 
@@ -19,10 +20,17 @@ class Engine:
         print("Starting rendering for resolution ", self.__width, "x", self.__height, ".")
 
         print("Creating rays from camera.")
-        rays = self.__create_rays(camera) # Contains rays origins and directions
-        rays_eta = np.ones((rays.shape[0],), dtype=np.float) # Supposing the camera is in the void
 
-        computed_colors, normal_map, tested_boxs, edges_map = self.__render(rays, rays_eta, scene, loop_number=0, max_loop=max_loop)
+        computed_colors = computed_colors = np.zeros((self.__width*self.__height, 3))
+        thinlenseloops = 1
+        for loop in range(thinlenseloops):
+
+            rays = camera.create_rays(self.__width, self.__height) # Contains rays origins and directions
+
+            rays_eta = np.ones((rays.shape[0],), dtype=np.float) # Supposing the camera is in the void
+
+            computed_colors_temp, normal_map, tested_boxs, edges_map = self.__render(rays, rays_eta, scene, loop_number=0, max_loop=max_loop)
+            computed_colors += computed_colors_temp
 
 
 
@@ -40,6 +48,7 @@ class Engine:
 
 
     def __render(self, rays, rays_eta, scene, loop_number=0, max_loop= 1):
+        print("Loop number: ", loop_number)
 
         computed_colors = np.zeros((rays.shape[0], 3))
 
@@ -79,8 +88,12 @@ class Engine:
             # We can then suppose we are entering an object which is the void, so we will rewrite object_eta to 1.
             objects_eta[np.where(objects_eta == rays_eta[hit_rays])] = 1.
 
+            objects_specular = np.array(tuple(objs_list[x].specular for x in hit_rays))
+
             inside_square_root = 1 - np.square(hit_rays_eta / objects_eta) * (1 - np.square(incidence_cosines))
             inside_square_root[np.where(inside_square_root<0)] = 0
+
+
             transmited_cosines = np.sqrt(inside_square_root)
 
             # Compute Fresnell reflection coefficient
@@ -91,8 +104,10 @@ class Engine:
                           ) / 2
             refraction = 1 - reflection
 
-            reflected_index = np.where(reflection > 0.00001)
-            refracted_index = np.where(refraction > 0.00001)
+
+            reflected_index = np.where((reflection > 0.01) & (objects_specular > 0.01))
+            refracted_index = np.where((refraction > 0.01) & (objects_specular > 0.01))
+
             reflected_direction = rays[hit_rays[reflected_index], 1] - \
                                   2 * np.sum(normals[reflected_index] * rays[hit_rays[reflected_index], 1],
                                              axis=1).reshape(
@@ -113,8 +128,8 @@ class Engine:
                                              max_loop=max_loop)
             refracted_colors = self.__render(refracted_rays, refracted_rays_eta, scene, loop_number=loop_number + 1,
                                              max_loop=max_loop)
-            objects_specular = np.array(tuple(objs_list[x].specular for x in hit_rays)).reshape(-1, 1)
 
+            objects_specular = objects_specular.reshape(-1, 1)
             computed_colors[hit_rays[reflected_index]] += objects_specular[reflected_index] \
                                                           * reflection[reflected_index].reshape(-1, 1) * reflected_colors
             computed_colors[hit_rays[refracted_index]] += objects_specular[refracted_index] \
@@ -145,34 +160,27 @@ class Engine:
             objects_colors = np.array([obj.color() for obj in objs_list[hit_rays]])
             objects_diffuse = np.array(tuple(objs_list[x].diffuse for x in hit_rays))
             where_diffuse = np.argwhere(objects_diffuse>0.01).reshape(-1)
-            n_iters = 100
+            n_iters = 10
+            if where_diffuse.shape[0] > 0:
+                for iter in progressbar(range(n_iters)):
 
-            for _ in range(n_iters):
-                random_directions = np.random.normal(size=( where_diffuse.shape[0], 3))
-                #random_directions /= np.linalg.norm(random_directions, axis=1).reshape(-1,1)
-                random_directions += normals[where_diffuse]*(2-np.sum(normals[where_diffuse] * random_directions, axis=1).reshape(-1,1))
-                random_directions /= np.linalg.norm(random_directions, axis=1).reshape(-1,1)
+                    random_directions = np.random.normal(size=(where_diffuse.shape[0], 3))
+                    #random_directions = np.tile(np.random.normal(size=3), (where_diffuse.shape[0], 1))
 
-                #irradience_cosines = np.sum(normals[where_diffuse] * random_directions, axis=2)
+                    random_directions += normals[where_diffuse] * (3 - np.sum(normals[where_diffuse] * random_directions, axis=1)).reshape(-1, 1)
+                    random_directions /= np.linalg.norm(random_directions, axis=1).reshape(-1,1)
 
-                rays_to_light = np.array((hit_points[where_diffuse], random_directions)).transpose(1, 0, 2)
-                to_light_ts_list, _, _ = scene.trace(rays_to_light)
-                # If ts is np.inf, no objects were intersected and the ray hit the lightprob at infinite
-                hit_light_rays = np.argwhere(to_light_ts_list == np.inf).reshape(-1)
-                light_colors = scene.light.getColorsFromDirections(random_directions[hit_light_rays])
+                    rays_to_light = np.array((hit_points[where_diffuse], random_directions)).transpose(1, 0, 2)
+                    to_light_ts_list, _, _ = scene.trace(rays_to_light)
+                    # If ts is np.inf, no objects were intersected and the ray hit the lightprob at infinite
+                    hit_light_rays = np.argwhere(to_light_ts_list == np.inf).reshape(-1)
+                    light_colors = scene.light.getColorsFromDirections(random_directions[hit_light_rays])
 
-                colors = objects_diffuse[where_diffuse[hit_light_rays]].reshape(-1, 1) \
-                         * light_colors * objects_colors[where_diffuse[hit_light_rays]] \
-                         / (n_iters * 0.63)  # 0.63 is the expectency of cos(theta)
+                    colors = objects_diffuse[where_diffuse[hit_light_rays]].reshape(-1, 1) \
+                             * light_colors * objects_colors[where_diffuse[hit_light_rays]] \
+                             / (n_iters)
 
-                computed_colors[hit_rays[where_diffuse[hit_light_rays]]] += colors
-
-            # Ambient light
-            #computed_colors[hit_rays] += objects_diffuse.reshape(-1,1)*10*objects_colors
-
-
-            print("light prob")
-
+                    computed_colors[hit_rays[where_diffuse[hit_light_rays]]] += colors
 
         # No hit:
         computed_colors[no_hit_rays] = scene.light.getColorsFromDirections(rays[no_hit_rays, 1])
@@ -189,8 +197,9 @@ class Engine:
         return computed_colors
 
 
-
+    # Todo: move this function to pinhole camera class
     def __create_rays(self, camera):
+
         horizontal_angle = camera.fov()
         vertical_angle = horizontal_angle * self.__height / self.__width
 
@@ -232,16 +241,16 @@ class Engine:
     def __make_image(self, computed_colors):
 
         computed_colors = computed_colors / np.max(computed_colors)
-        soft_min = np.percentile(computed_colors, 1)
+        soft_min = np.percentile(computed_colors, 5)
         computed_colors = np.maximum(computed_colors-soft_min, 0)
-        soft_max = np.percentile(computed_colors, 99)
+        soft_max = np.percentile(computed_colors, 95)
         computed_colors = np.minimum(computed_colors/soft_max, 1)
 
 
         gamma = 1
-        computed_colors =  np.power(computed_colors, gamma) #gamma correction
-        distplot(computed_colors.reshape(-1), kde=False)
-        plt.show()
+        computed_colors = np.power(computed_colors, 1/gamma) #gamma correction
+        #distplot(computed_colors.reshape(-1), kde=False)
+        #plt.show()
         computed_colors *= 254
 
         image = np.array(computed_colors, dtype=np.uint8)  # Unsigned int8 (from 0 to 255)
