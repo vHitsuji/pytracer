@@ -14,28 +14,56 @@ class Engine:
 
 
 
-    def render(self, scene, camera, max_loop=2):
+    def render(self, scene, camera, max_depth=2, loops=1000):
 
 
         print("Starting rendering for resolution ", self.__width, "x", self.__height, ".")
 
         print("Creating rays from camera.")
 
-        computed_colors = computed_colors = np.zeros((self.__width*self.__height, 3))
-        thinlenseloops = 1
-        for loop in range(thinlenseloops):
+        computed_colors = np.zeros((self.__width*self.__height, 3))
+        sample_numbers = np.zeros(self.__width*self.__height)
 
-            rays = camera.create_rays(self.__width, self.__height) # Contains rays origins and directions
+        to_update = np.arange(self.__width*self.__height)
 
+        for loop in range(loops):
+            if to_update.shape[0] == 0:
+                break
+            rays = camera.create_rays(self.__width, self.__height)[to_update] # Contains rays origins and directions
             rays_eta = np.ones((rays.shape[0],), dtype=np.float) # Supposing the camera is in the void
 
-            computed_colors_temp, normal_map, tested_boxs, edges_map = self.__render(rays, rays_eta, scene, loop_number=0, max_loop=max_loop)
-            computed_colors += computed_colors_temp
+            print("To update: ", to_update.shape[0], "pixels.")
+
+            if loop >= 20:
+                computed_colors_temp = self.__render(rays, rays_eta, scene, get_map=False, max_depth=max_depth)
+                # Compute normalized distance between average of measures at rank loop and loop-1
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    distance = np.max(np.abs(loop/(loop-1)*np.divide(computed_colors[to_update], computed_colors[to_update]+computed_colors_temp) - 1), axis=1)
+                distance[np.isnan(distance)] = 1
+
+                computed_colors[to_update] += computed_colors_temp
+                sample_numbers[to_update] += 1
+
+                to_update = to_update[np.argwhere(distance > 0.0001).reshape(-1)]
 
 
+            else:
+                computed_colors_temp, normal_map, tested_boxs, edges_map = self.__render(rays, rays_eta, scene,
+                                                                                         loop_number=0,
+                                                                                         max_depth=max_depth)
+                computed_colors += computed_colors_temp
+                sample_numbers += 1
+
+
+            self.__make_image(computed_colors/sample_numbers.reshape(-1, 1)).save("step.png")
+            
 
         print("Construct image.")
         # Make images and some interesting maps
+        plt.imshow(sample_numbers.reshape(self.__width, -1).T)
+        plt.savefig("compute.pdf")
+
+        computed_colors /= sample_numbers.reshape(-1, 1)
         image = self.__make_image(computed_colors)
 
 
@@ -47,8 +75,7 @@ class Engine:
 
 
 
-    def __render(self, rays, rays_eta, scene, loop_number=0, max_loop= 1):
-        print("Loop number: ", loop_number)
+    def __render(self, rays, rays_eta, scene, loop_number=0, max_depth= 1, get_map=True):
 
         computed_colors = np.zeros((rays.shape[0], 3))
 
@@ -68,7 +95,6 @@ class Engine:
 
 
         # Normals
-        print("Creating normals")
         normals = np.empty((len(hit_rays), 3))
         for i in range(len(hit_rays)):
             normal = objs_list[hit_rays[i]].normal(hit_points[i])
@@ -81,8 +107,7 @@ class Engine:
         incidence_cosines = np.abs(incidence_cosines)
 
 
-        if loop_number < max_loop:
-            print("Creating real reflected and refracted rays with Snell and Descartes laws.")
+        if loop_number < max_depth:
             objects_eta = np.array(tuple(objs_list[x].eta for x in hit_rays))
             # If object_eta is same than ray_eta, that means we were inside an object and we are going to get out
             # We can then suppose we are entering an object which is the void, so we will rewrite object_eta to 1.
@@ -93,7 +118,6 @@ class Engine:
             inside_square_root = 1 - np.square(hit_rays_eta / objects_eta) * (1 - np.square(incidence_cosines))
             inside_square_root[np.where(inside_square_root<0)] = 0
 
-
             transmited_cosines = np.sqrt(inside_square_root)
 
             # Compute Fresnell reflection coefficient
@@ -103,6 +127,14 @@ class Engine:
                                     (hit_rays_eta * transmited_cosines + objects_eta * incidence_cosines))
                           ) / 2
             refraction = 1 - reflection
+
+
+            # From here we can use the refraction and reflections coefficients to computes boths rays (exponential cost)
+            # We can also choose at random, stochastically, to do reflection or refraction, for monte carlo path tracing:
+
+            refraction = (refraction > np.random.random(refraction.shape[0])).astype(np.int)
+            reflection = 1 - refraction
+
 
 
             reflected_index = np.where((reflection > 0.01) & (objects_specular > 0.01))
@@ -125,9 +157,9 @@ class Engine:
             refracted_rays_eta = objects_eta[refracted_index]
 
             reflected_colors = self.__render(reflected_rays, reflected_rays_eta, scene, loop_number=loop_number + 1,
-                                             max_loop=max_loop)
+                                             max_depth=max_depth)
             refracted_colors = self.__render(refracted_rays, refracted_rays_eta, scene, loop_number=loop_number + 1,
-                                             max_loop=max_loop)
+                                             max_depth=max_depth)
 
             objects_specular = objects_specular.reshape(-1, 1)
             computed_colors[hit_rays[reflected_index]] += objects_specular[reflected_index] \
@@ -142,53 +174,47 @@ class Engine:
 
         # Lambertian
         if isinstance(scene.light, Light):
-            directions_to_light = scene.light.position() - hit_points
-            distance_to_light = np.linalg.norm(directions_to_light, axis=1).reshape(-1, )
-            directions_to_light /= distance_to_light.reshape(-1, 1)
-            irradience_cosines = np.sum(normals * directions_to_light, axis=1)
-            irradience_cosines = np.maximum(irradience_cosines, 0)
-            rays_to_light = np.array((hit_points, directions_to_light)).transpose(1, 0, 2)
-            to_light_ts_list, _, _ = scene.trace(rays_to_light)
-            distance_to_light[np.where(to_light_ts_list < distance_to_light)] = np.inf
-            # todo : Lambertian decreasing power should be 2 for energy conservation
-            lambertian_decreasing_power = 0
-            lambertian_values = 0.1 + irradience_cosines / (4 * np.pi * ((distance_to_light) ** lambertian_decreasing_power))
-            objects_colors = np.array([obj.color() for obj in objs_list[hit_rays]])
-            objects_diffuse = np.array(tuple(objs_list[x].diffuse for x in hit_rays))
-            computed_colors[hit_rays] += (objects_colors * (objects_diffuse.reshape(-1, 1)) * (lambertian_values.reshape(-1, 1)))
+            if hit_points.shape[0] > 0:
+                directions_to_light = scene.light.position() - hit_points
+                distance_to_light = np.linalg.norm(directions_to_light, axis=1).reshape(-1, )
+                directions_to_light /= distance_to_light.reshape(-1, 1)
+                irradience_cosines = np.sum(normals * directions_to_light, axis=1)
+                irradience_cosines = np.maximum(irradience_cosines, 0)
+                rays_to_light = np.array((hit_points, directions_to_light)).transpose(1, 0, 2)
+                to_light_ts_list, _, _ = scene.trace(rays_to_light)
+                # todo : Lambertian decreasing power should be 2 for energy conservation
+                lambertian_values = 0.0 + irradience_cosines
+                #lambertian_values[np.where(to_light_ts_list < distance_to_light)] = 0
+
+                objects_colors = np.array([obj.color() for obj in objs_list[hit_rays]])
+                objects_diffuse = np.array(tuple(objs_list[x].diffuse for x in hit_rays))
+                computed_colors[hit_rays] += (objects_colors * (objects_diffuse.reshape(-1, 1)) * (lambertian_values.reshape(-1, 1)))
         elif isinstance(scene.light, LightProb):
             objects_colors = np.array([obj.color() for obj in objs_list[hit_rays]])
             objects_diffuse = np.array(tuple(objs_list[x].diffuse for x in hit_rays))
             where_diffuse = np.argwhere(objects_diffuse>0.01).reshape(-1)
-            n_iters = 10
             if where_diffuse.shape[0] > 0:
-                for iter in progressbar(range(n_iters)):
 
-                    random_directions = np.random.normal(size=(where_diffuse.shape[0], 3))
-                    #random_directions = np.tile(np.random.normal(size=3), (where_diffuse.shape[0], 1))
+                random_directions = np.random.normal(size=(where_diffuse.shape[0], 3))
+                #random_directions = np.tile(np.random.normal(size=3), (where_diffuse.shape[0], 1))
+                random_directions += normals[where_diffuse] * (3 - np.sum(normals[where_diffuse] * random_directions, axis=1)).reshape(-1, 1)
+                random_directions /= np.linalg.norm(random_directions, axis=1).reshape(-1,1)
+                rays_to_light = np.array((hit_points[where_diffuse], random_directions)).transpose(1, 0, 2)
+                to_light_ts_list, _, _ = scene.trace(rays_to_light)
+                # If ts is np.inf, no objects were intersected and the ray hit the lightprob at infinite
+                hit_light_rays = np.argwhere(to_light_ts_list == np.inf).reshape(-1)
+                light_colors = scene.light.getColorsFromDirections(random_directions[hit_light_rays])
+                colors = objects_diffuse[where_diffuse[hit_light_rays]].reshape(-1, 1) \
+                         * light_colors * objects_colors[where_diffuse[hit_light_rays]]
+                computed_colors[hit_rays[where_diffuse[hit_light_rays]]] += colors
 
-                    random_directions += normals[where_diffuse] * (3 - np.sum(normals[where_diffuse] * random_directions, axis=1)).reshape(-1, 1)
-                    random_directions /= np.linalg.norm(random_directions, axis=1).reshape(-1,1)
-
-                    rays_to_light = np.array((hit_points[where_diffuse], random_directions)).transpose(1, 0, 2)
-                    to_light_ts_list, _, _ = scene.trace(rays_to_light)
-                    # If ts is np.inf, no objects were intersected and the ray hit the lightprob at infinite
-                    hit_light_rays = np.argwhere(to_light_ts_list == np.inf).reshape(-1)
-                    light_colors = scene.light.getColorsFromDirections(random_directions[hit_light_rays])
-
-                    colors = objects_diffuse[where_diffuse[hit_light_rays]].reshape(-1, 1) \
-                             * light_colors * objects_colors[where_diffuse[hit_light_rays]] \
-                             / (n_iters)
-
-                    computed_colors[hit_rays[where_diffuse[hit_light_rays]]] += colors
-
-        # No hit:
-        computed_colors[no_hit_rays] = scene.light.getColorsFromDirections(rays[no_hit_rays, 1])
+            # No hit:
+            computed_colors[no_hit_rays] = scene.light.getColorsFromDirections(rays[no_hit_rays, 1])
 
 
 
 
-        if loop_number == 0:
+        if loop_number == 0 and get_map:
             normal_map = self.__normal_map(normals, hit_rays)
             tested_boxs = self.__tested_boxs_map(tested_boxs_list)
             edges_map = self.__edges_map(objs_list)
@@ -197,27 +223,7 @@ class Engine:
         return computed_colors
 
 
-    # Todo: move this function to pinhole camera class
-    def __create_rays(self, camera):
 
-        horizontal_angle = camera.fov()
-        vertical_angle = horizontal_angle * self.__height / self.__width
-
-        x_s = camera.horizontalorientation().reshape(-1,1)\
-              *(np.sin(np.arange(self.__width)/self.__width - 0.5)*horizontal_angle)
-        y_s = np.sin(np.arange(self.__height) / self.__height - 0.5) \
-              * vertical_angle \
-              * camera.verticalorientation().reshape(-1, 1)
-
-        x_y = np.add(x_s[:,:,None], y_s[:,None,:])
-        rays_orientations = (camera.vueorientation()[:,None,None] + x_y).transpose(1,2,0).reshape(-1, 3)
-        rays_orientations /= np.linalg.norm(rays_orientations, axis=1, keepdims=True)
-
-        rays_origins = np.tile(camera.position(), self.__width*self.__height).reshape(-1, 3)
-
-        rays = np.array((rays_origins, rays_orientations)).transpose(1, 0, 2)
-
-        return rays
 
 
     def __tested_boxs_map(self, tested_boxs_list):
@@ -240,18 +246,19 @@ class Engine:
 
     def __make_image(self, computed_colors):
 
-        computed_colors = computed_colors / np.max(computed_colors)
+
         soft_min = np.percentile(computed_colors, 5)
         computed_colors = np.maximum(computed_colors-soft_min, 0)
         soft_max = np.percentile(computed_colors, 95)
         computed_colors = np.minimum(computed_colors/soft_max, 1)
 
 
+
         gamma = 1
         computed_colors = np.power(computed_colors, 1/gamma) #gamma correction
         #distplot(computed_colors.reshape(-1), kde=False)
         #plt.show()
-        computed_colors *= 254
+        computed_colors *= 255
 
         image = np.array(computed_colors, dtype=np.uint8)  # Unsigned int8 (from 0 to 255)
         image = image.reshape(self.__width, self.__height, 3)

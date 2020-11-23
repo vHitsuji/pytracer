@@ -109,7 +109,9 @@ class Scene():
         return self.__light
 
     def trace(self, rays, multiprocess=4):
-        print("Tracing ", rays.shape[0], " rays with ", multiprocess, " threads.")
+        if rays.shape[0] < 50000:
+            multiprocess = None
+        #print("Tracing ", rays.shape[0], " rays with ", multiprocess, " threads.")
         ts_list = np.full((rays.shape[0]), np.inf)
         objs_list = np.full((rays.shape[0]), None, dtype=np.object)
 
