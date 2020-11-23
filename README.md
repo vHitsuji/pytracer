@@ -3,6 +3,10 @@
 ![](/img/resized002.png)
 ![](/img/resized003.png)
 
+Find the final report article at:
+
+[https://github.com/vHitsuji/pytracer/blob/master/report/report.pdf](https://github.com/vHitsuji/pytracer/blob/master/report/report.pdf)
+
 # Pytracer
   We made a basic ray-tracer engine in Python from scratch. The engine
   supports spheres and triangles and can also load meshes in the obj
