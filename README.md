@@ -1,6 +1,7 @@
-![](report/img/resized000.png)
-![](report/img/lens1.png)
-![](report/img/1000.png)
+![](/img/resized000.png)
+![](/img/resized001.png)
+![](/img/resized002.png)
+![](/img/resized003.png)
 
 # Pytracer
   We made a basic ray-tracer engine in Python from scratch. The engine
